@@ -37,6 +37,7 @@ typedef enum methodType
 @property (weak) IBOutlet NSTextField *aDirFirstMsg;
 @property (weak) IBOutlet NSTextField *aDirSecondMsg;
 @property (weak) IBOutlet NSTextField *showMsg;
+- (IBAction)selectIsDestop:(id)sender;
 
 @end
 

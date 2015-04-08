@@ -42,7 +42,8 @@
     
     dirArray = [[NSMutableArray alloc] init];
     // yes = m文件生成在桌面createMFile内; no ＝ m文件生成位置与h文件同路径
-    isDesktop = NO;
+    isDesktop = YES;
+
 }
 
 - (void)viewDidDisappear
@@ -84,39 +85,44 @@
 #pragma mark - 点击生成事件
 - (IBAction)CreateMFiles:(id)sender {
     NSString *documentDir = _hDir.stringValue;
-    //********************创建生成路径
-    //在桌面创建文件夹pathDir
-    NSString *tempPath;
-    if (isDesktop) tempPath = [fm createPath:pathName];
-    //********************判断路径是文件夹路径还是文件路径
-    fileType isDir = [fm checkFilePath:documentDir suffix:nil];
-    if (isDir == fileTypeIsFolder) {
-        [fm ergodicFolder:documentDir list:dirArray];
-        NSLog(@"Every Files in the dir:%@",dirArray);
-    } else if(isDir == fileTypeIsFile) {
-        [dirArray addObject:documentDir];
-        NSLog(@"One File in the dir:%@",dirArray);
-    } else if (isDir == fileTypeIsError) {
-        self.hDirMsg.stringValue = kErrorMsg;
-    }
-    for (NSString *hFilePath in dirArray) {
-        //********************创建m文件路径
-        [self createMPath:hFilePath tempPath:tempPath];
-        //********************读取h文件
-        NSString *mFile = [self readHFileFormFilePath:hFilePath];
-        //********************生成m文件
-        NSError *error = nil;
-        [mFile writeToFile:createMPath atomically:YES encoding:NSUTF8StringEncoding error:&error];
-        NSString *errorMsg = [fm showError:[error localizedDescription]];
-        if (errorMsg) {
-            self.hDirMsg.stringValue = errorMsg;
-        } else {
-            self.showMsg.stringValue = [NSString stringWithFormat:@"生成m文件路径：%@", createMPath];
+    if (documentDir.length > 0) {
+        //********************创建生成路径
+        //在桌面创建文件夹pathDir
+        NSString *tempPath;
+        if (isDesktop) tempPath = [fm createPath:pathName];
+        //********************判断路径是文件夹路径还是文件路径
+        fileType isDir = [fm checkFilePath:documentDir suffix:nil];
+        if (isDir == fileTypeIsFolder) {
+            [fm ergodicFolder:documentDir list:dirArray];
+            NSLog(@"Every Files in the dir:%@",dirArray);
+        } else if(isDir == fileTypeIsFile) {
+            [dirArray addObject:documentDir];
+            NSLog(@"One File in the dir:%@",dirArray);
+        } else if (isDir == fileTypeIsError) {
+            self.hDirMsg.stringValue = kErrorMsg;
         }
-        NSLog(@"生成m文件路径：%@", createMPath);
+        for (NSString *hFilePath in dirArray) {
+            //********************创建m文件路径
+            [self createMPath:hFilePath tempPath:tempPath];
+            //********************读取h文件
+            NSString *mFile = [self readHFileFormFilePath:hFilePath];
+            //********************生成m文件
+            NSError *error = nil;
+            [mFile writeToFile:createMPath atomically:YES encoding:NSUTF8StringEncoding error:&error];
+            NSString *errorMsg = [fm showError:[error localizedDescription]];
+            if (errorMsg) {
+                self.hDirMsg.stringValue = errorMsg;
+            } else {
+                self.showMsg.stringValue = [NSString stringWithFormat:@"生成m文件路径：%@", createMPath];
+                [self showHelpMsg];
+            }
+            NSLog(@"生成m文件路径：%@", createMPath);
+        }
+        _hDir.stringValue = @"";
+        [dirArray removeAllObjects];
+    } else {
+        self.hDirMsg.stringValue = @"文件不存在！";
     }
-    _hDir.stringValue = @"";
-    [dirArray removeAllObjects];
 }
 
 #pragma mark - 点击合并a文件
@@ -261,4 +267,19 @@
         return @"";
     }
 }
+- (IBAction)selectIsDestop:(id)sender {
+    NSButton *btn = (NSButton *)sender;
+    isDesktop = (BOOL)[btn state];
+}
+
+- (void)showHelpMsg
+{
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.alertStyle = NSInformationalAlertStyle;
+    alert.messageText = @"帮助";
+    alert.informativeText = @"目前暂不支持编译.a文件，需要自己编译项目得到";
+    [alert addButtonWithTitle:@"OK"];
+    [alert beginSheetModalForWindow:[self.view window] completionHandler:nil];
+}
+
 @end
