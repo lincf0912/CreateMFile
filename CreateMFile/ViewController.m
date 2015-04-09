@@ -64,6 +64,7 @@
         {
             self.aDirFirstMsg.stringValue = @"";
             _aDirFirst.stringValue = [self openFile:@"a"];
+            NSLog(@"%@",  _aDirFirst.stringValue);
             NSString *str = [CommandManager runSystemCommand:_aDirFirst.stringValue];
             self.aDirFirstMsg.stringValue = [[str componentsSeparatedByString:@":"] lastObject];
             break;
