@@ -41,6 +41,15 @@ static FileManager *shared = nil;
     return tempPath;
 }
 
+- (BOOL)copyAtPath:(NSString *)atPath toPath:(NSString *)toPath
+{
+    NSError *error = nil;
+    BOOL isOK = [fm copyItemAtPath:atPath toPath:toPath error:&error];
+    [self showError:[error localizedDescription]];
+    
+    return isOK;
+}
+
 #pragma mark - 判断路径是文件夹路径还是文件路径
 - (fileType)checkFilePath:(NSString *)path suffix:(NSString *)suffix
 {
@@ -53,7 +62,7 @@ static FileManager *shared = nil;
             //文件夹
             return fileTypeIsFolder;
         } else {
-            if ( suffix != nil ) {
+            if ( suffix.length ) {
                 if ( [path hasSuffix:suffix] ) {
                     return fileTypeIsFile;
                 } else {
@@ -70,9 +79,11 @@ static FileManager *shared = nil;
 }
 
 #pragma mark - 遍历文件夹内的文件，将所有子目录的文件找出
-- (void)ergodicFolder:(NSString *)documentDir list:(NSMutableArray *)dirArray
+- (void)ergodicFolder:(NSString *)documentDir complete:(void (^)(NSString *filePath, BOOL *stop))complete
 {
+    if (complete == nil) return;
     NSError *error = nil;
+    BOOL stop = NO;
     NSArray *fileList = [[NSArray alloc] init];
     //fileList便是包含有该文件夹下所有文件的文件名及文件夹名的数组
     fileList = [fm contentsOfDirectoryAtPath:documentDir error:&error];
@@ -82,15 +93,24 @@ static FileManager *shared = nil;
     for (NSString *file in fileList) {
         NSString *path = [documentDir stringByAppendingPathComponent:file];
         isDir = [self checkFilePath:path suffix:nil];
-        if (isDir == fileTypeIsFolder) {
-            [self ergodicFolder:path list:dirArray];
-        } else if(isDir == fileTypeIsFile) {
-            //对文件路径进行筛选
-            if ([path hasSuffix:@".h"] && ![path hasPrefix:@"."]) {
-                [dirArray addObject:path];
+        if (isDir == fileTypeIsFolder && ![[path lowercaseString] hasSuffix:@"framework"]) {
+            [self ergodicFolder:path complete:complete];
+        } else if(isDir == fileTypeIsFile || [[path lowercaseString] hasSuffix:@"framework"]) {
+            complete(path, &stop);
+            if (stop) {
+                break;
             }
         }
     }
+}
+- (void)ergodicFolderWithHFile:(NSString *)documentDir list:(NSMutableArray *)dirArray
+{
+    [self ergodicFolder:documentDir complete:^(NSString *filePath, BOOL *stop) {
+        //对文件路径进行筛选
+        if ([filePath hasSuffix:@".h"] && ![filePath hasPrefix:@"."]) {
+            [dirArray addObject:filePath];
+        }
+    }];
 }
 
 #pragma mark - 读取文件的数据

@@ -12,7 +12,8 @@
 
 #define pathName @"createMFile"
 #define kErrorMsg @"文件错误或不存在！"
-#define kCreateAFileName @"libXXX.a"
+#define blendPathName @"blend"
+#define kCreateExtern @"_blend"
 
 @implementation ViewController
 {
@@ -48,6 +49,7 @@
 
 - (void)viewDidDisappear
 {
+    [super viewDidDisappear];
     exit(0);
 }
 
@@ -64,8 +66,12 @@
         {
             self.aDirFirstMsg.stringValue = @"";
             _aDirFirst.stringValue = [self openFile:@"a"];
-            NSLog(@"%@",  _aDirFirst.stringValue);
-            NSString *str = [CommandManager runSystemCommand:_aDirFirst.stringValue];
+            NSString *commend = _aDirFirst.stringValue;
+            if ([_aDirFirst.stringValue hasSuffix:@"framework"]) {
+                NSString *frameworkName = [commend lastPathComponent];
+                commend = [commend stringByAppendingPathComponent:[frameworkName stringByDeletingPathExtension]];
+            }
+            NSString *str = [CommandManager runSystemCommand:commend];
             self.aDirFirstMsg.stringValue = [[str componentsSeparatedByString:@":"] lastObject];
             break;
         }
@@ -73,7 +79,12 @@
         {
             self.aDirSecondMsg.stringValue = @"";
             _aDirSecond.stringValue = [self openFile:@"a"];
-            NSString *str = [CommandManager runSystemCommand:_aDirSecond.stringValue];
+            NSString *commend = _aDirSecond.stringValue;
+            if ([_aDirSecond.stringValue hasSuffix:@"framework"]) {
+                NSString *frameworkName = [commend lastPathComponent];
+                commend = [commend stringByAppendingPathComponent:[frameworkName stringByDeletingPathExtension]];
+            }
+            NSString *str = [CommandManager runSystemCommand:commend];
             self.aDirSecondMsg.stringValue = [[str componentsSeparatedByString:@":"] lastObject];
             break;
         }
@@ -94,7 +105,7 @@
         //********************判断路径是文件夹路径还是文件路径
         fileType isDir = [fm checkFilePath:documentDir suffix:nil];
         if (isDir == fileTypeIsFolder) {
-            [fm ergodicFolder:documentDir list:dirArray];
+            [fm ergodicFolderWithHFile:documentDir list:dirArray];
             NSLog(@"Every Files in the dir:%@",dirArray);
         } else if(isDir == fileTypeIsFile) {
             [dirArray addObject:documentDir];
@@ -128,37 +139,122 @@
 
 #pragma mark - 点击合并a文件
 - (IBAction)appenAFile:(id)sender {
-    NSString *aDirF = _aDirFirst.stringValue;
-    NSString *aDirS = _aDirSecond.stringValue;
-    NSArray *strings = [aDirF componentsSeparatedByString: @"/"];
-    NSString *tempName  = [strings objectAtIndex:[strings count]-1];
-    NSString *appenFilePath = [aDirF stringByReplacingOccurrencesOfString:tempName withString:@""];
-    appenFilePath = [appenFilePath stringByAppendingString:kCreateAFileName];
-    NSString *commond = [NSString stringWithFormat:@"lipo -create %@ %@ -output %@", aDirF, aDirS, appenFilePath];
-    NSLog(@"%@", commond);
-//    NSString *comm = @"lipo -info /Users/lincf/Downloads/ccpsdk/libccpapisdk.a";
-    fileType aIsDirF = [fm checkFilePath:aDirF suffix:@".a"];
-    fileType aIsDirS = [fm checkFilePath:aDirS suffix:@".a"];
-    if ( aIsDirF == fileTypeIsFile && aIsDirS==fileTypeIsFile ) {
-        if ([CommandManager execSystemResult:commond]) {
-            _aDirFirst.stringValue = @"";
-            _aDirSecond.stringValue = @"";
-            _aDirFirstMsg.stringValue = @"";
-            _aDirSecondMsg.stringValue = @"";
-            NSLog(@"合成成功！");
-            _showMsg.stringValue = [NSString stringWithFormat:@"生成a文件路径：%@", appenFilePath];
-            NSLog(@"生成a文件路径：%@", appenFilePath);
-        }else{
-            _showMsg.stringValue = @"合成失败！";
-            NSLog(@"合成失败！");
+    NSMutableDictionary *aFileDictF = [NSMutableDictionary dictionary];
+    NSMutableDictionary *aFileDictS = [NSMutableDictionary dictionary];
+    
+    [self getEffectiveFilePath:_aDirFirst.stringValue complete:^(NSString *filePath) {
+        if (filePath) {
+            [aFileDictF setObject:filePath forKey:[filePath lastPathComponent]];
+        }
+    }];
+    
+    [self getEffectiveFilePath:_aDirSecond.stringValue complete:^(NSString *filePath) {
+        if (filePath) {
+            [aFileDictS setObject:filePath forKey:[filePath lastPathComponent]];
+        }
+    }];
+    
+    if (aFileDictF.count == aFileDictS.count) {
+        
+        NSInteger count = aFileDictF.count;
+        
+        if (count == 1) {
+            [self mergerStaticLibaray:aFileDictF.allValues.lastObject other:aFileDictS.allValues.lastObject];
+        } else {
+            NSArray *allKeys = aFileDictF.allKeys;
+            for (NSInteger i=0; i<count; i++) {
+                NSString *key = allKeys[i];
+                
+                [self mergerStaticLibaray:aFileDictF[key] other:aFileDictS[key]];
+            }
         }
     } else {
-        if (aIsDirF == fileTypeIsError) {
-            self.aDirFirstMsg.stringValue = kErrorMsg;
-        } else if (aIsDirS == fileTypeIsError){
-            self.aDirSecondMsg.stringValue = kErrorMsg;
-        }
+        _showMsg.stringValue = @"合成失败！文件数量不一致";
     }
+}
+
+- (void)getEffectiveFilePath:(NSString *)path complete:(void (^)(NSString *filePath))complete
+{
+    NSString *aDir = path;
+    NSString *aFile = nil;
+    
+    fileType aIsDir = [fm checkFilePath:aDir suffix:nil];
+    
+    if ([[aDir lowercaseString] hasSuffix:@"framework"]) {
+        NSString *frameworkName = [aDir lastPathComponent];
+        aFile = [aDir stringByAppendingPathComponent:[frameworkName stringByDeletingPathExtension]];
+        
+        if (complete) {
+            complete(aFile);
+        }
+    } else if ([[aDir lowercaseString] hasSuffix:@"a"]) {
+        
+        aFile = [aDir copy];
+        
+        if (complete) {
+            complete(aFile);
+        }
+    } else if (aIsDir == fileTypeIsFolder) {
+        __weak typeof(self) weakSelf = self;
+        [fm ergodicFolder:aDir complete:^(NSString *filePath, BOOL *stop) {
+            [weakSelf getEffectiveFilePath:filePath complete:complete];
+        }];
+    }
+    
+    
+}
+
+- (BOOL)mergerStaticLibaray:(NSString *)path1 other:(NSString *)path2
+{
+    NSString *aDirF = path1;
+    NSString *aDirS = path2;
+    
+    NSString *tempName  = aDirF.lastPathComponent;
+    NSString *extension = tempName.pathExtension;
+    NSString *newName = tempName;//[[[tempName stringByDeletingPathExtension] stringByAppendingString:kCreateExtern] stringByAppendingPathExtension:extension];
+    NSString *blendPath = [[fm createPath:blendPathName] stringByAppendingPathComponent:blendPathName];
+    NSString *appenFilePath = [blendPath stringByAppendingPathComponent:newName];
+    
+    if ([aDirF.pathExtension isEqualToString:aDirS.pathExtension]) {
+        
+        if (newName.pathExtension.length == 0) { //framework
+            NSString *o_frameworkPath = [aDirF stringByDeletingLastPathComponent];
+            NSString *o_frameworkName = [o_frameworkPath lastPathComponent];
+            [fm copyAtPath:o_frameworkPath toPath:[blendPath stringByAppendingPathComponent:o_frameworkName]];
+            appenFilePath = [[blendPath stringByAppendingPathComponent:o_frameworkName] stringByAppendingPathComponent:newName];
+        }
+        
+        NSString *commond = [NSString stringWithFormat:@"lipo -create %@ %@ -output %@", aDirF, aDirS, appenFilePath];
+        NSLog(@"%@", commond);
+        //    NSString *comm = @"lipo -info /Users/lincf/Downloads/ccpsdk/libccpapisdk.a";
+        fileType aIsDirF = [fm checkFilePath:aDirF suffix:extension];
+        fileType aIsDirS = [fm checkFilePath:aDirS suffix:extension];
+        if ( aIsDirF == fileTypeIsFile && aIsDirS==fileTypeIsFile ) {
+            if ([CommandManager execSystemResult:commond]) {
+                _aDirFirst.stringValue = @"";
+                _aDirSecond.stringValue = @"";
+                _aDirFirstMsg.stringValue = @"";
+                _aDirSecondMsg.stringValue = @"";
+                NSLog(@"合成成功！");
+                _showMsg.stringValue = [NSString stringWithFormat:@"生成文件路径：%@", appenFilePath];
+                NSLog(@"生成文件路径：%@", appenFilePath);
+                return YES;
+            }else{
+                _showMsg.stringValue = @"合成失败！";
+                NSLog(@"合成失败！");
+            }
+        } else {
+            if (aIsDirF == fileTypeIsError) {
+                self.aDirFirstMsg.stringValue = kErrorMsg;
+            } else if (aIsDirS == fileTypeIsError){
+                self.aDirSecondMsg.stringValue = kErrorMsg;
+            }
+        }
+    } else {
+        _showMsg.stringValue = @"合成失败！非同类型文件";
+    }
+    
+    return NO;
 }
 
 #pragma mark - 根据返回类型替换
@@ -226,7 +322,7 @@
             [mFile appendString:@"\n\n"];
         }
         //判断是否方法
-        if ([tmp hasPrefix:@"-"]) {
+        if ([tmp hasPrefix:@"-"] || [tmp hasPrefix:@"+"]) {
             //            NSLog(@"替换前tmp:%@", tmp);
             //判断是否有返回类型
             NSRange foundObj=[tmp rangeOfString:@"(void)" options:NSCaseInsensitiveSearch];
