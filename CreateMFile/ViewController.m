@@ -120,16 +120,19 @@
             NSString *mFile = [self readHFileFormFilePath:hFilePath];
             //********************生成m文件
             NSError *error = nil;
-            [mFile writeToFile:createMPath atomically:YES encoding:NSUTF8StringEncoding error:&error];
+            BOOL isOK = [mFile writeToFile:createMPath atomically:YES encoding:NSUTF8StringEncoding error:&error];
             NSString *errorMsg = [fm showError:[error localizedDescription]];
             if (errorMsg) {
                 self.hDirMsg.stringValue = errorMsg;
-            } else {
+            } else if (isOK) {
                 self.showMsg.stringValue = [NSString stringWithFormat:@"生成m文件路径：%@", createMPath];
-                [self showHelpMsg];
+                NSLog(@"生成m文件路径：%@", createMPath);
             }
-            NSLog(@"生成m文件路径：%@", createMPath);
         }
+        static dispatch_once_t onceToken;
+        dispatch_once(&onceToken, ^{
+            [self showHelpMsg];
+        });
         _hDir.stringValue = @"";
         [dirArray removeAllObjects];
     } else {
@@ -258,16 +261,18 @@
 }
 
 #pragma mark - 根据返回类型替换
-- (NSString *)methodReturnType:(int)type
+- (NSString *)methodReturnType:(int)type classStr:(NSString *)classStr
 {
     NSString *str;
     switch (type) {
         case methodType_void:
-            str = [NSString stringWithFormat:@"\n{\n\n}\n\n"];
+            str = [NSString stringWithFormat:@"\n{\n\n}"];
             break;
         case methodType_string:
-            str = [NSString stringWithFormat:@"\n{\n    return 0;\n}\n\n"];
+            str = [NSString stringWithFormat:@"\n{\n    return 0;\n}"];
             break;
+        case methodType_struct:
+            str = [NSString stringWithFormat:@"\n{\n    %@\n    return x;\n}", [classStr stringByAppendingString:@" x;"]];
         default:
             break;
     }
@@ -298,18 +303,26 @@
     data = [fm contentsAtPath:hFilePath];
     //生成m文件并处理import部分
     NSString *hFile = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    NSMutableString *mFile = [[NSMutableString alloc] initWithFormat:@"#import \"%@\"", hFilename];
-    [mFile appendString:@"\n\n"];
+    
+    NSString *header = [NSString stringWithFormat:@"#import \"%@\"\n\n", hFilename];
+    NSMutableString *mFile = [NSMutableString stringWithFormat:@""];
+    
     
     //按行读取文件
     NSString *tmp;
     //按行拆分文件内容
     NSArray *lines = [hFile componentsSeparatedByString:@"\n"];
     NSEnumerator *nse = [lines objectEnumerator];
+    //判断类起始与结束相呼应
+    BOOL isClassStart = NO;
+    //判断方法起始与结束相呼应
+    BOOL isMethodStart = NO;
+    NSMutableString *methodString;
     //按行读取文件内容
     while(tmp = [nse nextObject]) {
         //处理m文件的@implementation部分
         if ([tmp hasPrefix:@"@interface"]) {
+            isClassStart = YES;
             tmp =  [tmp substringFromIndex:@"@interface".length];
             NSRange range = [tmp rangeOfString:@":"];
             tmp = [[tmp substringToIndex:range.location] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
@@ -317,27 +330,67 @@
             [mFile appendString:@"\n\n"];
         }
         //处理m文件的@end部分
-        if ([tmp hasPrefix:@"@end"]) {
+        if (isClassStart && [tmp hasPrefix:@"@end"]) {
+            isClassStart = NO;
             [mFile appendString:tmp];
             [mFile appendString:@"\n\n"];
         }
         //判断是否方法
-        if ([tmp hasPrefix:@"-"] || [tmp hasPrefix:@"+"]) {
-            //            NSLog(@"替换前tmp:%@", tmp);
-            //判断是否有返回类型
-            NSRange foundObj=[tmp rangeOfString:@"(void)" options:NSCaseInsensitiveSearch];
-            if (foundObj.length > 0) {
-                //没有返回类型
-                tmp = [tmp stringByReplacingOccurrencesOfString:@";" withString:[self methodReturnType:methodType_void]];
-            } else {
-                //有返回类型
-                tmp = [tmp stringByReplacingOccurrencesOfString:@";" withString:[self methodReturnType:methodType_string]];
+        if (isClassStart) {
+            if (isMethodStart == NO && ([tmp hasPrefix:@"-"] || [tmp hasPrefix:@"+"])) {
+                isMethodStart = YES;
+                methodString = [NSMutableString stringWithString:@""];
             }
-            //            NSLog(@"替换后tmp:%@", tmp);
-            [mFile appendString:tmp];
+            if (isMethodStart) {
+                [methodString appendString:tmp];
+                
+                NSRange splitRange = [methodString rangeOfString:@";"];
+                if (splitRange.length > 0) {
+                    
+                    NSString *returnClass = nil;
+                    int methodType = 0;
+                    //判断是否有返回类型
+                    NSRange foundObj=[methodString rangeOfString:@"(void)" options:NSCaseInsensitiveSearch];
+                    if (foundObj.length > 0) {
+                        //没有返回类型
+                        methodType = methodType_void;
+                    } else {
+                        methodType = methodType_string;
+                        NSRange leftRange = [methodString rangeOfString:@"("];
+                        NSRange rightRange = [methodString rangeOfString:@")"];
+                        if (leftRange.length && rightRange.length) {
+                            NSUInteger location = leftRange.location+leftRange.length;
+                            NSRange newRange = NSMakeRange(location, rightRange.location-location);
+                            NSString *tempReturnClass = [methodString substringWithRange:newRange];
+                            returnClass = [tempReturnClass stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+                            // 返回值为CG类型的结构体，例如CGPoint等
+                            if ([returnClass hasPrefix:@"CG"]) {
+                                methodType = methodType_struct;
+                            }
+                        }
+                    }
+                    
+                    //有返回类型
+                    [methodString replaceCharactersInRange:splitRange withString:[self methodReturnType:methodType classStr:returnClass]];
+                    
+                    [mFile appendString:methodString];
+                    // 避免上一个方法的注释影响。
+                    [mFile appendString:@"\n\n"];
+                    
+                    isMethodStart = NO;
+                } else {
+                    [methodString appendString:@"\n"];
+                }
+            }
         }
     }
-    return mFile;
+    
+    if (mFile.length) {
+        [mFile insertString:header atIndex:0];
+        return mFile;
+    }
+    
+    return nil;
 }
 
 - (void)setRepresentedObject:(id)representedObject {
@@ -374,7 +427,7 @@
     NSAlert *alert = [[NSAlert alloc] init];
     alert.alertStyle = NSInformationalAlertStyle;
     alert.messageText = @"帮助";
-    alert.informativeText = @"目前暂不支持编译.a文件，需要自己编译项目得到";
+    alert.informativeText = @"目前暂不支持编译.a或framework文件，需要自己编译项目得到";
     [alert addButtonWithTitle:@"OK"];
     [alert beginSheetModalForWindow:[self.view window] completionHandler:nil];
 }

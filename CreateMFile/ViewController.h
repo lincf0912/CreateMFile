@@ -26,6 +26,7 @@ typedef enum methodType
 {
     methodType_void = 0,
     methodType_string = 1,
+    methodType_struct = 20,
 }methodType;
 
 @interface ViewController : NSViewController
